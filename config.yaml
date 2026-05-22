@@ -1,0 +1,33 @@
+# ACC Dashboard — ARETE Command Center
+#
+# Configuration file. Paths are relative to the server/ directory
+# unless absolute. Secrets go in ~/.hermes/.env (already exists).
+
+acc:
+  port: 8643
+  host: "127.0.0.1"
+  # LAN IPs to allow in CORS (auto-detected IPs are also added)
+  lan_ips: []
+  # Request timeout in seconds
+  request_timeout: 30
+
+hermes:
+  vault_path: "/mnt/c/Users/Iniolu/Documents/GitHub/Second brain"
+  url: "http://localhost:8642"
+
+discord:
+  # #the-round-table channel for Shu monitoring
+  shu_channel_id: "1505240708079030302"
+  home_channel_id: "1504537224690274356"
+  # Token loaded from DISCORD_BOT_TOKEN env var (set in ~/.hermes/.env)
+  env_token_var: "DISCORD_BOT_TOKEN"
+
+frontend:
+  dev_port: 5173
+
+claude_code:
+  enabled: true
+  # data_dir defaults to auto-discovery (WSL ~/.claude then Windows mount)
+  # Override here to pin a specific path:
+  # data_dir: "/mnt/c/Users/Iniolu/.claude"
+  cache_ttl_seconds: 30
