@@ -257,7 +257,7 @@ class ClaudeCodeReader:
         """Log an error for the adapter to pick up."""
         logger.warning(
             "claude_code_reader_error",
-            extra={"message": message, "severity": severity},
+            extra={"error_message": message, "severity": severity},
         )
 
     # ── Sessions ────────────────────────────────────────────────────────────────
