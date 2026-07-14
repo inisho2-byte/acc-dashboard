@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
 import * as api from "../api";
 import { FONTS, AGENT_COLORS } from "../styles/theme.js";
+import PanelLayout from "../components/PanelLayout";
+import EmptyState from "../components/EmptyState";
 
 // ── Pair Extractor ──────────────────────────────────────────
 function extractPairs(text) {
@@ -173,6 +175,7 @@ export default function TradingPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [activeSection, setActiveSection] = useState("all");
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -182,6 +185,7 @@ export default function TradingPanel() {
         if (msgs) {
           setMessages(msgs);
           setError(false);
+          setLastUpdated(Date.now());
         } else if (messages === null) {
           setError(true);
         }
@@ -221,93 +225,57 @@ export default function TradingPanel() {
     return messages || [];
   }, [activeSection, briefs, spikes, messages]);
 
+  // Build stats for PanelLayout header strip
+  const stats = hasData ? [
+    { label: "Briefs", value: briefs.length },
+    { label: "Spikes", value: spikes.length },
+    { label: "Pairs", value: allPairs.length },
+  ] : [];
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10, height: "100%" }}>
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontFamily: FONTS.mono, fontSize: 9, color: "rgba(0,212,255,0.5)", letterSpacing: "0.16em" }}>TRADING FEED</span>
-          {!loading && hasData && (
-            <span style={{ fontFamily: FONTS.mono, fontSize: 8, padding: "1px 6px", borderRadius: 3, background: "rgba(0,255,136,0.08)", border: "1px solid rgba(0,255,136,0.2)", color: "#00ff88", letterSpacing: "0.06em" }}>{briefs.length}B · {spikes.length}S</span>
+    <PanelLayout
+      title="TRADING"
+      icon="⧫"
+      accentColor="#34d399"
+      loading={loading && !messages}
+      lastUpdated={lastUpdated}
+      stats={stats}
+    >
+      {hasData ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, height: "100%" }}>
+          {/* Section tabs */}
+          <div style={{ display: "flex", gap: 2 }}>
+            {[
+              { key: "all", label: "ALL" },
+              { key: "briefs", label: "BRIEFS" },
+              { key: "spikes", label: "SPIKES" },
+            ].map(tab => (
+              <button key={tab.key} onClick={() => setActiveSection(tab.key)} style={{ fontFamily: FONTS.mono, fontSize: 9, letterSpacing: "0.1em", padding: "4px 10px", borderRadius: 4, border: `1px solid ${activeSection === tab.key ? "rgba(0,212,255,0.4)" : "rgba(0,212,255,0.1)"}`, background: activeSection === tab.key ? "rgba(0,212,255,0.12)" : "transparent", color: activeSection === tab.key ? "#00d4ff" : "rgba(0,212,255,0.4)", cursor: "pointer", transition: "all 0.15s" }}>{tab.label}</button>
+            ))}
+          </div>
+
+          {/* Message feed */}
+          {displayMessages.length > 0 && (
+            <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
+              {displayMessages.map((msg, i) => {
+                if (msg.msg_type === "spike") return <SpikeCard key={msg.id || `s-${i}`} msg={msg} idx={i} />;
+                return <BriefCard key={msg.id || `b-${i}`} msg={msg} idx={i} />;
+              })}
+            </div>
+          )}
+          {displayMessages.length === 0 && (
+            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <span style={{ fontFamily: FONTS.mono, fontSize: 10, color: "rgba(150,180,220,0.3)" }}>No {activeSection === "briefs" ? "briefs" : activeSection === "spikes" ? "spike alerts" : "messages"} in this category</span>
+            </div>
           )}
         </div>
-      </div>
-
-      {/* Summary bar */}
-      {hasData && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <div className="panel" style={{ padding: "6px 10px", minWidth: 80, flex: "0 0 auto" }}>
-            <div style={{ fontFamily: FONTS.mono, fontSize: 7, color: "rgba(150,180,220,0.4)", letterSpacing: "0.08em", marginBottom: 2 }}>BRIEFS</div>
-            <div style={{ fontFamily: FONTS.mono, fontSize: 18, fontWeight: 700, color: "#00d4ff" }}>{briefs.length}</div>
-          </div>
-          <div className="panel" style={{ padding: "6px 10px", minWidth: 80, flex: "0 0 auto" }}>
-            <div style={{ fontFamily: FONTS.mono, fontSize: 7, color: "rgba(150,180,220,0.4)", letterSpacing: "0.08em", marginBottom: 2 }}>SPIKES</div>
-            <div style={{ fontFamily: FONTS.mono, fontSize: 18, fontWeight: 700, color: allAlerts.some(a => a.level === "extreme") ? "#ff4444" : allAlerts.some(a => a.level === "warning") ? "#f59e0b" : "#00ff88" }}>{spikes.length}</div>
-          </div>
-          {allAlerts.slice(0, 3).map((a, i) => (
-            <div key={i} className="panel" style={{ padding: "4px 8px", flex: "0 0 auto" }}>
-              <span style={{ fontFamily: FONTS.mono, fontSize: 8, color: a.level === "extreme" ? "#ff6666" : "#f59e0b", letterSpacing: "0.06em" }}>{a.symbol} {a.level.toUpperCase()}</span>
-            </div>
-          ))}
-          <div className="panel" style={{ padding: "6px 10px", flex: 1 }}>
-            <div style={{ fontFamily: FONTS.mono, fontSize: 7, color: "rgba(150,180,220,0.4)", letterSpacing: "0.08em", marginBottom: 2 }}>PAIRS</div>
-            <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
-              {allPairs.slice(0, 8).map((p, i) => (
-                <span key={i} style={{ fontFamily: FONTS.mono, fontSize: 9, color: "#a78bfa", background: "rgba(167,139,250,0.08)", border: "1px solid rgba(167,139,250,0.2)", borderRadius: 3, padding: "1px 6px", letterSpacing: "0.04em" }}>{p}</span>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Section tabs */}
-      <div style={{ display: "flex", gap: 2 }}>
-        {[
-          { key: "all", label: "ALL" },
-          { key: "briefs", label: "BRIEFS" },
-          { key: "spikes", label: "SPIKES" },
-        ].map(tab => (
-          <button key={tab.key} onClick={() => setActiveSection(tab.key)} style={{ fontFamily: FONTS.mono, fontSize: 9, letterSpacing: "0.1em", padding: "4px 10px", borderRadius: 4, border: `1px solid ${activeSection === tab.key ? "rgba(0,212,255,0.4)" : "rgba(0,212,255,0.1)"}`, background: activeSection === tab.key ? "rgba(0,212,255,0.12)" : "transparent", color: activeSection === tab.key ? "#00d4ff" : "rgba(0,212,255,0.4)", cursor: "pointer", transition: "all 0.15s" }}>{tab.label}</button>
-        ))}
-      </div>
-
-      {/* Loading */}
-      {loading && (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontFamily: FONTS.mono, fontSize: 10, color: "rgba(150,180,220,0.3)", animation: "pulse 1.5s ease-in-out infinite" }}>⏳ Loading trading data...</span>
-        </div>
-      )}
-
-      {/* Empty */}
-      {!loading && !hasData && (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontFamily: FONTS.mono, fontSize: 11, color: error ? "rgba(255,68,68,0.5)" : "rgba(150,180,220,0.3)", letterSpacing: "0.06em" }}>
-              {error ? "⚠ Failed to load trading feed" : "No trading data yet"}
-            </div>
-            {!error && (
-              <div style={{ fontFamily: FONTS.mono, fontSize: 9, color: "rgba(150,180,220,0.2)", marginTop: 6 }}>
-                Forex briefs hourly · Spike alerts every 5 min
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Message feed */}
-      {hasData && displayMessages.length > 0 && (
-        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
-          {displayMessages.map((msg, i) => {
-            if (msg.msg_type === "spike") return <SpikeCard key={msg.id || `s-${i}`} msg={msg} idx={i} />;
-            return <BriefCard key={msg.id || `b-${i}`} msg={msg} idx={i} />;
-          })}
-        </div>
-      )}
-      {hasData && displayMessages.length === 0 && (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontFamily: FONTS.mono, fontSize: 10, color: "rgba(150,180,220,0.3)" }}>No {activeSection === "briefs" ? "briefs" : activeSection === "spikes" ? "spike alerts" : "messages"} in this category</span>
-        </div>
-      )}
-    </div>
+      ) : !loading ? (
+        <EmptyState
+          icon="⧫"
+          title={error ? "Failed to load trading feed" : "No trading data yet"}
+          description={error ? "Check your connection and try again." : "Forex briefs arrive hourly. Spike alerts trigger every 5 minutes."}
+        />
+      ) : null}
+    </PanelLayout>
   );
 }

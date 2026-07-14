@@ -1,6 +1,7 @@
+import React from "react";
 import { FONTS, STATUS_COLORS } from "../styles/theme.js";
 
-export default function ProjectCard({ p, idx, onClick, delta }) {
+function ProjectCard({ p, idx, onClick, delta }) {
   const c = STATUS_COLORS[p.status] || "#888";
   const progress = p.phase_count > 0 ? Math.round((p.phases_complete / p.phase_count) * 100) : 0;
 
@@ -45,6 +46,8 @@ export default function ProjectCard({ p, idx, onClick, delta }) {
         </div>
       </div>
       )}
-    </div>
-  );
+ </div>
+ );
 }
+
+export default React.memo(ProjectCard);

@@ -264,6 +264,9 @@ class HermesAdapter(AgentAdapter):
                     continue
                 # Transform api_server job format to dashboard format
                 schedule = item.get("schedule", "")
+                # Hermes API may return schedule as a dict {"kind": "cron", "expr": "...", "display": "..."}
+                if isinstance(schedule, dict):
+                    schedule = schedule.get("expr") or schedule.get("display") or ""
                 if not schedule and item.get("trigger") == "cron":
                     schedule = item.get("trigger_args", "")
                 jobs.append(
@@ -272,8 +275,8 @@ class HermesAdapter(AgentAdapter):
                         "status": "active" if not item.get("paused") else "paused",
                         "name": item.get("name", ""),
                         "schedule": schedule,
-                        "next_run": item.get("next_run", ""),
-                        "last_run": item.get("last_run", ""),
+                        "next_run": item.get("next_run_at") or item.get("next_run", ""),
+                        "last_run": item.get("last_run_at") or item.get("last_run", ""),
                         "last_status": item.get("last_status", ""),
                     }
                 )

@@ -3,6 +3,8 @@ import {
   getClaudeSessions, getClaudeTasks, getClaudePlans, getClaudePlanContent,
   getClaudeSkills, getClaudeSettings, getClaudeFileHistory
 } from '../api.js';
+import PanelLayout from '../components/PanelLayout';
+import EmptyState from '../components/EmptyState';
 
 const POLL_MS = 30000; // 30s refresh
 
@@ -207,6 +209,7 @@ export default function ClaudeCodePanel() {
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [planContent, setPlanContent] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -223,6 +226,7 @@ export default function ClaudeCodePanel() {
       if (p) setPlans(p);
       if (sk) setSkills(sk);
       if (st) setSettings(st);
+      setLastUpdated(Date.now());
     } catch (e) {
       console.warn('Claude Code fetch error:', e);
     }
@@ -237,43 +241,65 @@ export default function ClaudeCodePanel() {
     if (data) setPlanContent(data.content);
   };
 
-  if (loading && !sessions.length) {
-    return <div style={{ padding: 40, textAlign: 'center', color: '#888' }}>Loading Claude Code data...</div>;
-  }
+  // Detect initial load (no data at all yet)
+  const isInitialLoading = loading && sessions.length === 0 && tasks.length === 0 && plans.length === 0 && skills.length === 0 && !settings;
 
-  return <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-    <div style={{
-      display: 'flex', gap: 4, marginBottom: 12, padding: '0 4px',
-      borderBottom: '1px solid #2a2d35'
-    }}>
-      {TABS.map(t => (
-        <button key={t} onClick={() => { setTab(t); setSelectedPlan(null); }} style={{
-          padding: '6px 14px', border: 'none', cursor: 'pointer',
-          background: tab === t ? '#1a6fb5' : 'transparent',
-          color: tab === t ? '#fff' : '#888', borderRadius: '4px 4px 0 0',
-          fontSize: 13, fontWeight: tab === t ? 600 : 400
-        }}>{t.toUpperCase()}</button>
-      ))}
-    </div>
+  // Build stats for PanelLayout header strip
+  const stats = !isInitialLoading ? [
+    { label: "Sessions", value: sessions.length },
+    { label: "Tasks", value: tasks.length },
+    { label: "Plans", value: plans.length },
+  ] : [];
 
-    <div style={{ flex: 1, overflow: 'auto', padding: '0 4px' }}>
-      {selectedPlan && tab === 'plans' ? (
-        <div>
-          <button onClick={() => setSelectedPlan(null)} style={{
-            background: 'none', border: '1px solid #444', color: '#aaa', padding: '4px 12px',
-            borderRadius: 4, cursor: 'pointer', marginBottom: 12, fontSize: 12
-          }}>← Back to plans</button>
-          <pre style={{
-            color: '#ccc', fontSize: 12, background: '#1a1d23', padding: 16,
-            borderRadius: 8, overflow: 'auto', maxHeight: '80vh', whiteSpace: 'pre-wrap'
-          }}>{planContent}</pre>
+  return (
+    <PanelLayout
+      title="CLAUDE"
+      icon="⬡"
+      accentColor="#34d399"
+      loading={isInitialLoading}
+      lastUpdated={lastUpdated}
+      stats={stats}
+    >
+      {isInitialLoading ? null : (
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <div style={{
+            display: 'flex', gap: 4, marginBottom: 12, padding: '0 4px',
+            borderBottom: '1px solid #2a2d35'
+          }}>
+            {TABS.map(t => (
+              <button key={t} onClick={() => { setTab(t); setSelectedPlan(null); }} style={{
+                padding: '6px 14px', border: 'none', cursor: 'pointer',
+                background: tab === t ? '#1a6fb5' : 'transparent',
+                color: tab === t ? '#fff' : '#888', borderRadius: '4px 4px 0 0',
+                fontSize: 13, fontWeight: tab === t ? 600 : 400
+              }}>{t.toUpperCase()}</button>
+            ))}
+          </div>
+
+          <div style={{ flex: 1, overflow: 'auto', padding: '0 4px' }}>
+            {selectedPlan && tab === 'plans' ? (
+              <div>
+                <button onClick={() => setSelectedPlan(null)} style={{
+                  background: 'none', border: '1px solid #444', color: '#aaa', padding: '4px 12px',
+                  borderRadius: 4, cursor: 'pointer', marginBottom: 12, fontSize: 12
+                }}>← Back to plans</button>
+                <pre style={{
+                  color: '#ccc', fontSize: 12, background: '#1a1d23', padding: 16,
+                  borderRadius: 8, overflow: 'auto', maxHeight: '80vh', whiteSpace: 'pre-wrap'
+                }}>{planContent}</pre>
+              </div>
+            ) : tab === 'sessions' ? <SessionsView sessions={sessions} />
+            : tab === 'tasks' ? <TasksView tasks={tasks} />
+            : tab === 'plans' ? <PlansView plans={plans} onSelectPlan={handleSelectPlan} />
+            : tab === 'skills' ? <SkillsView skills={skills} />
+            : tab === 'settings' ? <SettingsView settings={settings} />
+            : null}
+          </div>
         </div>
-      ) : tab === 'sessions' ? <SessionsView sessions={sessions} />
-      : tab === 'tasks' ? <TasksView tasks={tasks} />
-      : tab === 'plans' ? <PlansView plans={plans} onSelectPlan={handleSelectPlan} />
-      : tab === 'skills' ? <SkillsView skills={skills} />
-      : tab === 'settings' ? <SettingsView settings={settings} />
-      : null}
-    </div>
-  </div>;
+      )}
+      {!isInitialLoading && sessions.length === 0 && tasks.length === 0 && plans.length === 0 && skills.length === 0 && !settings && (
+        <EmptyState icon="⬡" title="No Claude Code data" description="Claude Code sessions, tasks, and plans will appear here when available." />
+      )}
+    </PanelLayout>
+  );
 }

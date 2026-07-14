@@ -369,6 +369,10 @@ async def auth_middleware(request: Request, call_next):
     if path in AUTH_EXEMPT_PATHS:
         return await call_next(request)
 
+    # SSE chat stream uses query-param auth (EventSource can't send headers)
+    if path.startswith("/api/chat/stream"):
+        return await call_next(request)
+
     # Static files (non-/api paths) are also exempt
     if not path.startswith("/api"):
         return await call_next(request)
@@ -395,7 +399,10 @@ EXPENSIVE_ROUTE_LIMITS = {
     "/api/search": ("20/minute", "GET"),
     "/api/search/rebuild": ("2/minute", "POST"),
     "/api/dispatch": ("10/minute", "POST"),
-    "/api/skills": ("20/minute", None),  # Any method on skills
+    "/api/skills": ("20/minute", None), # Any method on skills
+    "/api/chat/arete": ("10/minute", "POST"),
+    "/api/chat/claude": ("10/minute", "POST"),
+    "/api/chat/shu": ("20/minute", "POST"),
 }
 
 
@@ -443,7 +450,7 @@ async def per_path_rate_limit(request: Request, call_next):
 
 
 # Routes that spawn agent tasks and need longer than the global request timeout.
-LONG_RUNNING_PREFIXES = ("/api/dispatch", "/api/skills/")
+LONG_RUNNING_PREFIXES = ("/api/dispatch", "/api/skills/", "/api/chat/")
 LONG_RUNNING_TIMEOUT = 180  # 3 minutes — matches agent task processing time
 
 

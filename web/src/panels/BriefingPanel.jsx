@@ -2,10 +2,13 @@ import { useState, useEffect, useCallback } from "react";
 import DOMPurify from "dompurify";
 import * as api from "../api";
 import { FONTS } from "../styles/theme.js";
+import PanelLayout from "../components/PanelLayout";
+import EmptyState from "../components/EmptyState";
 
 export default function BriefingPanel() {
   const [briefing, setBriefing] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(null);
   const [hours, setHours] = useState(() => {
     const stored = typeof window !== "undefined" && localStorage.getItem("acc_last_checkin");
     if (stored) {
@@ -20,48 +23,64 @@ export default function BriefingPanel() {
     setLoading(true);
     const res = await api.getBriefing(hours);
     setBriefing(res);
+    setLastUpdated(new Date().toISOString());
     localStorage.setItem("acc_last_checkin", new Date().toISOString());
     setLoading(false);
   }, [hours]);
 
   useEffect(() => { loadBriefing(); }, [loadBriefing]);
 
+  const actions = (
+    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+      <select
+        value={hours}
+        onChange={e => setHours(Number(e.target.value))}
+        style={{ padding: "4px 8px", background: "rgba(0,212,255,0.06)", border: "1px solid rgba(0,212,255,0.2)", borderRadius: 4, fontFamily: FONTS.mono, fontSize: 9, color: "#e8f4fd", outline: "none", cursor: "pointer" }}
+      >
+        <option value={6}>6h</option>
+        <option value={12}>12h</option>
+        <option value={24}>24h</option>
+        <option value={48}>48h</option>
+        <option value={72}>72h</option>
+      </select>
+      <button
+        onClick={loadBriefing}
+        disabled={loading}
+        style={{ padding: "4px 10px", background: loading ? "rgba(0,212,255,0.08)" : "rgba(0,212,255,0.15)", border: "1px solid rgba(0,212,255,0.3)", borderRadius: 4, color: "#00d4ff", fontFamily: FONTS.mono, fontSize: 9, cursor: "pointer" }}
+      >
+        {loading ? "..." : "REFRESH"}
+      </button>
+    </div>
+  );
+
+  const stats = briefing?.summary ? [
+    { label: "Events", value: briefing.summary.total_events ?? "—" },
+    { label: "Sessions", value: briefing.summary.arete_sessions ?? "—" },
+    { label: "Errors", value: briefing.summary.errors ?? "—" },
+  ] : null;
+
+  const isEmpty = !loading && briefing && briefing.errors?.length === 0 && briefing.recent_sessions?.length === 0 && briefing.recent_messages?.length === 0;
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12, height: "100%" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div style={{ fontFamily: FONTS.mono, fontSize: 9, color: "rgba(0,212,255,0.5)", letterSpacing: "0.16em" }}>
-          {briefing ? `BRIEFING · LAST ${briefing.since_hours}H` : "BRIEFING"}
-        </div>
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <select
-            value={hours}
-            onChange={e => setHours(Number(e.target.value))}
-            style={{ padding: "4px 8px", background: "rgba(0,212,255,0.06)", border: "1px solid rgba(0,212,255,0.2)", borderRadius: 4, fontFamily: FONTS.mono, fontSize: 9, color: "#e8f4fd", outline: "none", cursor: "pointer" }}
-          >
-            <option value={6}>6h</option>
-            <option value={12}>12h</option>
-            <option value={24}>24h</option>
-            <option value={48}>48h</option>
-            <option value={72}>72h</option>
-          </select>
-          <button
-            onClick={loadBriefing}
-            disabled={loading}
-            style={{ padding: "4px 10px", background: loading ? "rgba(0,212,255,0.08)" : "rgba(0,212,255,0.15)", border: "1px solid rgba(0,212,255,0.3)", borderRadius: 4, color: "#00d4ff", fontFamily: FONTS.mono, fontSize: 9, cursor: "pointer" }}
-          >
-            {loading ? "..." : "REFRESH"}
-          </button>
-        </div>
-      </div>
-
-      {loading && !briefing && (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontFamily: FONTS.mono, fontSize: 10, color: "rgba(150,180,220,0.3)" }}>Loading briefing...</span>
-        </div>
+    <PanelLayout
+      title="BRIEF"
+      icon="◈"
+      accentColor="#f59e0b"
+      subtitle={briefing ? `LAST ${briefing.since_hours}H` : undefined}
+      loading={loading && !briefing}
+      lastUpdated={lastUpdated}
+      actions={actions}
+      stats={stats}
+    >
+      {isEmpty && (
+        <EmptyState
+          icon="◈"
+          title="No activity"
+          description={`No activity in the last ${briefing.since_hours} hours`}
+        />
       )}
-
-      {briefing && (
-        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
+      {briefing && !isEmpty && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {/* Narrative */}
           {briefing.narrative && (
             <div style={{ fontFamily: FONTS.sans, fontSize: 12, color: "rgba(200,230,255,0.85)", lineHeight: 1.5, padding: "10px 14px", background: "rgba(0,212,255,0.04)", border: "1px solid rgba(0,212,255,0.1)", borderRadius: 6 }}>
@@ -141,14 +160,8 @@ export default function BriefingPanel() {
               ))}
             </div>
           )}
-
-          {briefing.errors?.length === 0 && briefing.recent_sessions?.length === 0 && briefing.recent_messages?.length === 0 && (
-            <div style={{ padding: 20, textAlign: "center", fontFamily: FONTS.mono, fontSize: 10, color: "rgba(150,180,220,0.3)" }}>
-              No activity in the last {briefing.since_hours} hours
-            </div>
-          )}
         </div>
       )}
-    </div>
+    </PanelLayout>
   );
 }

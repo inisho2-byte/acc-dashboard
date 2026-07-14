@@ -268,6 +268,66 @@ export async function getInferenceUsage() {
   return fetchJSON(`${API}/inference/usage`);
 }
 
+export async function getOverview() {
+  return fetchJSON(`${API}/overview`);
+}
+
+export async function getVPS() {
+  return fetchJSON(`${API}/vps`);
+}
+
+export async function getAgents() {
+  return fetchJSON(`${API}/agents`);
+}
+
+export async function getBoard() {
+  return fetchJSON(`${API}/board`);
+}
+
+export async function createBoardTask(title, priority = "medium", notes = null) {
+  const res = await fetch(`${API}/board`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, priority, notes }),
+  });
+  return res.json();
+}
+
+export async function moveBoardTask(taskId, direction) {
+  const res = await fetch(`${API}/board/${taskId}/move`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ direction }),
+  });
+  return res.json();
+}
+
+export async function deleteBoardTask(taskId) {
+  const res = await fetch(`${API}/board/${taskId}`, { method: "DELETE" });
+  return res.json();
+}
+
+export async function getSchedule() {
+  return fetchJSON(`${API}/schedule`);
+}
+
+export async function getContentList() {
+  return fetchJSON(`${API}/content`);
+}
+
+export async function getContentDoc(path) {
+  return fetchJSON(`${API}/content/get?path=${encodeURIComponent(path)}`);
+}
+
+export async function saveContentDoc(path, content) {
+  const res = await fetch(`${API}/content/save`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, content }),
+  });
+  return res.json();
+}
+
 // ── Claude Code ───────────────────────────────────────────────────────
 
 export async function getClaudeHealth() {

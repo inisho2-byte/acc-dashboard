@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import * as api from "../api.js";
 import { FONTS } from "../styles/theme.js";
+import PanelLayout from "../components/PanelLayout";
+import EmptyState from "../components/EmptyState";
 
 export default function CronDashboardPanel() {
   const [data, setData] = useState(null);
@@ -131,41 +133,28 @@ export default function CronDashboardPanel() {
 
   const jobs = data?.jobs || [];
 
+  const panelStats = data?.total != null ? [{ label: "Cron Jobs", value: data.total }] : [];
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12, height: "100%" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div style={{ fontFamily: FONTS.mono, fontSize: 9, color: "rgba(0,212,255,0.5)", letterSpacing: "0.16em" }}>
-          CRON DASHBOARD
-        </div>
-        {data?.total !== undefined && (
-          <span style={{ fontFamily: FONTS.mono, fontSize: 8, color: "rgba(150,180,220,0.35)" }}>
-            {data.total} job{data.total !== 1 ? "s" : ""}
-          </span>
-        )}
-      </div>
-
-      {loading && !data && (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontFamily: FONTS.mono, fontSize: 10, color: "rgba(150,180,220,0.3)" }}>Loading cron data...</span>
-        </div>
-      )}
-
+    <PanelLayout
+      title="CRON"
+      icon="◷"
+      accentColor="#f59e0b"
+      loading={loading && !data}
+      stats={panelStats}
+    >
       {data && (
         <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
           {jobs.map((job, i) => renderJob(job, i, jobs.length))}
           {jobs.length === 0 && (
-            <div className="panel" style={{ padding: 20, textAlign: "center" }}>
-              <span style={{ fontFamily: FONTS.mono, fontSize: 10, color: "rgba(150,180,220,0.3)" }}>No cron jobs found</span>
-            </div>
+            <EmptyState icon="◷" title="No cron jobs yet" description="No scheduled jobs found" />
           )}
         </div>
       )}
 
       {!loading && !data && (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontFamily: FONTS.mono, fontSize: 10, color: "rgba(150,180,220,0.3)" }}>No cron data available</span>
-        </div>
+        <EmptyState icon="◷" title="No cron data yet" description="Cron dashboard unavailable" />
       )}
-    </div>
+    </PanelLayout>
   );
 }

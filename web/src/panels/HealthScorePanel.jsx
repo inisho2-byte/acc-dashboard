@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import * as api from "../api.js";
 import { FONTS } from "../styles/theme.js";
+import PanelLayout from "../components/PanelLayout";
+import EmptyState from "../components/EmptyState";
 
 export default function HealthScorePanel() {
   const [data, setData] = useState(null);
@@ -67,18 +69,20 @@ export default function HealthScorePanel() {
   const breakdown = data?.breakdown || {};
   const recommendations = data?.recommendations || [];
 
+  const panelStats = data ? [
+    { label: "Score", value: score },
+    { label: "Healthy", value: breakdown.sessions?.score ?? "—" },
+    { label: "Degraded", value: breakdown.errors?.score ?? "—" },
+  ] : [];
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12, height: "100%" }}>
-      <div style={{ fontFamily: FONTS.mono, fontSize: 9, color: "rgba(0,212,255,0.5)", letterSpacing: "0.16em" }}>
-        HEALTH SCORE
-      </div>
-
-      {loading && !data && (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontFamily: FONTS.mono, fontSize: 10, color: "rgba(150,180,220,0.3)" }}>Calculating health...</span>
-        </div>
-      )}
-
+    <PanelLayout
+      title="HEALTH"
+      icon="◯"
+      accentColor="#00d4ff"
+      loading={loading && !data}
+      stats={panelStats}
+    >
       {data && (
         <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
           {/* Score display */}
@@ -143,10 +147,8 @@ export default function HealthScorePanel() {
       )}
 
       {!loading && !data && (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontFamily: FONTS.mono, fontSize: 10, color: "rgba(150,180,220,0.3)" }}>No health data available</span>
-        </div>
+        <EmptyState icon="◯" title="No health data yet" description="Health score calculation unavailable" />
       )}
-    </div>
+    </PanelLayout>
   );
 }

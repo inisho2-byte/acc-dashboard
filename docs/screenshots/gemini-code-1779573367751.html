@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Centrifuge Style Claude Code Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+        
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #0b0b0c;
+        }
+        .terminal-text {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        /* Custom scrollbar to match the sleek dark theme */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #111112;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #27272a;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #3f3f46;
+        }
+    </style>
+</head>
+<body class="text-[#f4f4f5] min-h-screen flex p-4 sm:p-6 justify-center items-center bg-gradient-to-br from-[#120c0c] via-[#0b0b0c] to-[#0c0d14]">
+
+    <div class="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-12 gap-5 bg-[#111112] border border-[#1f1f23] rounded-2xl p-6 shadow-2xl relative overflow-hidden">
+        
+        <div class="absolute -top-40 -left-40 w-80 h-80 bg-orange-500/5 rounded-full blur-[100px] pointer-events-none"></div>
+        <div class="absolute -bottom-40 -right-40 w-80 h-80 bg-purple-500/5 rounded-full blur-[100px] pointer-events-none"></div>
+
+        <div class="lg:col-span-5 flex flex-col gap-5">
+            
+            <div class="bg-[#18181b] border border-[#27272a]/60 rounded-xl p-5 flex items-start gap-4">
+                <div class="w-12 h-12 rounded-xl bg-gradient-to-tr from-orange-500 to-pink-500 flex items-center justify-center shadow-lg shadow-orange-500/10 shrink-0">
+                    <i data-lucide="terminal" class="w-6 h-6 text-white"></i>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2 text-xs font-medium text-orange-400 uppercase tracking-wider mb-1">
+                        <span class="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse"></span> Agentic Environment
+                    </div>
+                    <h1 class="text-xl font-bold tracking-tight text-white">Claude Code Terminal</h1>
+                    <p class="text-xs text-zinc-400 mt-0.5">Workspace: <span class="terminal-text text-zinc-300">~/projects/apex-swarm</span></p>
+                </div>
+            </div>
+
+            <div class="bg-[#141416] border border-[#1f1f23] rounded-xl p-5 flex-1 flex flex-col justify-between">
+                <div>
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-sm font-semibold text-zinc-300">System Parameters</h3>
+                        <span class="text-[10px] font-medium tracking-wide bg-[#221c1a] text-orange-300 border border-orange-500/20 px-2 py-0.5 rounded-full uppercase">Active Harness</span>
+                    </div>
+                    
+                    <div class="space-y-3.5">
+                        <div class="flex justify-between items-center border-b border-[#1f1f23] pb-2.5">
+                            <span class="text-xs text-zinc-400">Target Architecture</span>
+                            <span class="text-xs font-medium text-zinc-200 terminal-text">Trilateral Swarm</span>
+                        </div>
+                        <div class="flex justify-between items-center border-b border-[#1f1f23] pb-2.5">
+                            <span class="text-xs text-zinc-400">Core Engine</span>
+                            <span class="text-xs font-medium text-zinc-200 terminal-text">Codex-v4</span>
+                        </div>
+                        <div class="flex justify-between items-center border-b border-[#1f1f23] pb-2.5">
+                            <span class="text-xs text-zinc-400">Context Router</span>
+                            <span class="text-xs font-medium text-zinc-200 terminal-text">Tera_Node_01</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-xs text-zinc-400">Available Pipelines</span>
+                            <div class="flex gap-1.5">
+                                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500/20 border border-emerald-500/50 flex items-center justify-center text-[7px] text-emerald-400 font-bold">✓</span>
+                                <span class="w-2.5 h-2.5 rounded-full bg-blue-500/20 border border-blue-500/50 flex items-center justify-center text-[7px] text-blue-400 font-bold">✓</span>
+                                <span class="w-2.5 h-2.5 rounded-full bg-purple-500/20 border border-purple-500/50 flex items-center justify-center text-[7px] text-purple-400 font-bold">✓</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 mt-6 pt-4 border-t border-[#1f1f23]">
+                    <div class="bg-[#18181b] p-3 rounded-lg border border-[#27272a]/40">
+                        <p class="text-[10px] text-zinc-500 uppercase font-semibold">Context Usage</p>
+                        <p class="text-lg font-bold text-zinc-100 mt-0.5 terminal-text">14.2%</p>
+                    </div>
+                    <div class="bg-[#18181b] p-3 rounded-lg border border-[#27272a]/40">
+                        <p class="text-[10px] text-zinc-500 uppercase font-semibold">Compute Cost</p>
+                        <p class="text-lg font-bold text-emerald-400 mt-0.5 terminal-text">$0.00 <span class="text-[10px] text-zinc-500 font-normal">local</span></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="lg:col-span-7 flex flex-col h-[520px] bg-[#141416] border border-[#1f1f23] rounded-xl overflow-hidden shadow-inner">
+            
+            <div class="bg-[#18181b] px-4 py-3 border-b border-[#1f1f23] flex justify-between items-center shrink-0">
+                <div class="flex items-center gap-2">
+                    <div class="flex gap-1.5 mr-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-[#ef4444]/20 border border-[#ef4444]/40"></span>
+                        <span class="w-2.5 h-2.5 rounded-full bg-[#f59e0b]/20 border border-[#f59e0b]/40"></span>
+                        <span class="w-2.5 h-2.5 rounded-full bg-[#10b981]/20 border border-[#10b981]/40"></span>
+                    </div>
+                    <span class="text-xs font-semibold tracking-wide text-zinc-400 uppercase terminal-text">claude-code-cli</span>
+                </div>
+                <div class="flex items-center gap-3 text-xs text-zinc-500">
+                    <span class="flex items-center gap-1"><i data-lucide="git-branch" class="w-3.5 h-3.5 text-orange-500/70"></i> main</span>
+                    <button class="hover:text-white transition p-1 rounded hover:bg-[#27272a]"><i data-lucide="terminal" class="w-3.5 h-3.5"></i></button>
+                </div>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-4 space-y-4 terminal-text text-sm">
+                
+                <div class="text-zinc-500 text-xs border-l-2 border-zinc-700 pl-3 py-0.5">
+                    [System] Initializing session via local pipeline wrapper...<br>
+                    [System] All modules loaded. Ready to execute file edits, tool chains, or structural updates.
+                </div>
+
+                <div class="flex items-start gap-3 justify-end">
+                    <div class="max-w-[85%] bg-[#27272a] text-zinc-100 px-3.5 py-2 rounded-xl rounded-tr-none border border-[#3f3f46]/40 shadow-sm">
+                        <p class="text-xs text-orange-400/90 font-bold mb-1">User</p>
+                        Analyze the repository structure and cross-reference the current graph architecture with our master directory maps.
+                    </div>
+                </div>
+
+                <div class="flex items-start gap-3">
+                    <div class="w-7 h-7 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400 shrink-0 shadow-md">
+                        <i data-lucide="bot" class="w-4 h-4"></i>
+                    </div>
+                    <div class="max-w-[85%] bg-[#18181b] border border-[#27272a] px-3.5 py-2 rounded-xl rounded-tl-none shadow-sm space-y-2">
+                        <p class="text-xs text-zinc-400 font-bold">Claude Code <span class="text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded font-normal ml-1.5">Agent Mode</span></p>
+                        
+                        <p class="text-zinc-300 leading-relaxed text-xs">I've parsed the layout. The system maps align properly across your local paths. I detected 3 unmapped script targets in your active pipeline directory.</p>
+                        
+                        <div class="bg-[#0b0b0c] border border-[#1f1f23] rounded-lg p-2.5 mt-2 overflow-x-auto">
+                            <div class="flex justify-between items-center text-[10px] text-zinc-500 mb-1.5 font-sans">
+                                <span>Executed Command</span>
+                                <span class="text-emerald-400">success</span>
+                            </div>
+                            <code class="text-xs text-zinc-400 block whitespace-pre">$ openclaw --status --target=./mastermind</code>
+                            <code class="text-xs text-orange-300/90 block mt-1">➔ 12 active blocks mapped successfully to Obsidian md layout.</code>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-1 text-xs text-zinc-500 pt-2">
+                    <span class="w-1.5 h-3 bg-zinc-500 animate-pulse inline-block"></span>
+                    <span class="italic font-sans text-[11px]">Claude is idle... awaiting execution block</span>
+                </div>
+            </div>
+
+            <div class="p-3 bg-[#18181b] border-t border-[#1f1f23] shrink-0">
+                <div class="flex items-center gap-2 bg-[#0b0b0c] border border-[#27272a] rounded-lg px-3 py-2 focus-within:border-orange-500/50 transition-all duration-200">
+                    <span class="terminal-text text-xs text-orange-500 font-bold shrink-0">apex-swarm $</span>
+                    <input type="text" placeholder="Ask Claude to modify code, run analysis, or manage files..." 
+                           class="bg-transparent text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none flex-1 terminal-all">
+                    <div class="flex items-center gap-1.5 text-zinc-500 shrink-0">
+                        <kbd class="text-[10px] bg-[#18181b] border border-[#27272a] px-1.5 py-0.5 rounded text-zinc-400 terminal-text">Enter</kbd>
+                        <button class="hover:text-orange-400 transition p-1 rounded hover:bg-[#18181b]">
+                            <i data-lucide="arrow-up-right" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+    </script>
+</body>
+</html>

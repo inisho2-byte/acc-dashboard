@@ -2,17 +2,23 @@ import { useState, useEffect } from "react";
 import * as api from "../api.js";
 import { FONTS } from "../styles/theme.js";
 import Sparkline from "../components/Sparkline.jsx";
+import PanelLayout from "../components/PanelLayout";
+import EmptyState from "../components/EmptyState";
 
 export default function TrendsPanel() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
     const fetchTrends = async () => {
       try {
         const res = await api.getTrends();
-        if (!cancelled) setData(res);
+        if (!cancelled) {
+          setData(res);
+          setLastUpdated(new Date().toISOString());
+        }
       } catch {
         // Trends may be unavailable
       } finally {
@@ -128,20 +134,26 @@ export default function TrendsPanel() {
     );
   };
 
+  const noData = !loading && !data;
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12, height: "100%" }}>
-      <div style={{ fontFamily: FONTS.mono, fontSize: 9, color: "rgba(0,212,255,0.5)", letterSpacing: "0.16em" }}>
-        7-DAY TRENDS
-      </div>
-
-      {loading && !data && (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontFamily: FONTS.mono, fontSize: 10, color: "rgba(150,180,220,0.3)" }}>Loading trends...</span>
-        </div>
+    <PanelLayout
+      title="TRENDS"
+      icon="◢"
+      accentColor="#a78bfa"
+      subtitle="7-DAY"
+      loading={loading && !data}
+      lastUpdated={lastUpdated}
+    >
+      {noData && (
+        <EmptyState
+          icon="◢"
+          title="No trend data"
+          description="Trend data is currently unavailable"
+        />
       )}
-
       {data && (
-        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {renderSection("SESSIONS", data.sessions, "#00d4ff")}
 
           <div className="panel" style={{ padding: "12px 14px" }}>
@@ -150,12 +162,6 @@ export default function TrendsPanel() {
           </div>
         </div>
       )}
-
-      {!loading && !data && (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontFamily: FONTS.mono, fontSize: 10, color: "rgba(150,180,220,0.3)" }}>No trend data available</span>
-        </div>
-      )}
-    </div>
+    </PanelLayout>
   );
 }

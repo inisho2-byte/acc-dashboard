@@ -64,11 +64,12 @@ class EventBus:
 
     def __init__(self, max_queues: int = 10, queue_size: int = 64) -> None:
         self._subscribers: list[asyncio.Queue[Event]] = []
+        self._topic_subscribers: dict[str, list[asyncio.Queue]] = {}
         self._max_queues = max_queues
         self._queue_size = queue_size
 
     async def publish(self, event_type: str, payload: dict[str, Any]) -> None:
-        """Broadcast an event to all subscribers."""
+        """Broadcast an event to all subscribers (flat + topic)."""
         event = Event(event_type, payload)
         logger.debug(
             f"SSE event published: {event_type} (id={event.event_id})",
@@ -80,7 +81,7 @@ class EventBus:
                 # Non-blocking put; drop oldest if full
                 if q.full():
                     try:
-                        q.get_nowait()  # Drop oldest
+                        q.get_nowait() # Drop oldest
                     except asyncio.QueueEmpty:
                         pass
                 q.put_nowait(event)
@@ -88,6 +89,28 @@ class EventBus:
                 dead.append(q)
         for q in dead:
             self._subscribers.remove(q)
+
+        # Route to topic subscribers. For chat events, the payload
+        # should contain a "request_id" field. We fan out to any
+        # topic matching "chat:{request_id}".
+        if event_type == "chat" and isinstance(payload, dict):
+            rid = payload.get("request_id", "")
+            if rid:
+                topic_key = f"chat:{rid}"
+                topic_queues = self._topic_subscribers.get(topic_key, [])
+                dead_topics: list[asyncio.Queue] = []
+                for q in topic_queues:
+                    try:
+                        if q.full():
+                            try:
+                                q.get_nowait()
+                            except asyncio.QueueEmpty:
+                                pass
+                        q.put_nowait(payload)
+                    except asyncio.CancelledError:
+                        dead_topics.append(q)
+                for q in dead_topics:
+                    topic_queues.remove(q)
 
     def subscribe(self) -> asyncio.Queue[Event]:
         """Create a new subscriber queue. Caller should async-iterate."""
@@ -105,6 +128,26 @@ class EventBus:
         if q in self._subscribers:
             self._subscribers.remove(q)
             logger.info(f"SSE subscriber removed (total: {len(self._subscribers)})")
+
+    def subscribe_topic(self, topic: str, q: asyncio.Queue) -> None:
+        """Subscribe a queue to a specific topic (e.g. 'chat:abc123').
+
+        Topic subscribers receive raw payload dicts (not Event objects)
+        so the SSE endpoint can serialize them directly.
+        """
+        if topic not in self._topic_subscribers:
+            self._topic_subscribers[topic] = []
+        self._topic_subscribers[topic].append(q)
+        logger.info(f"Topic subscriber added: {topic} (total topics: {len(self._topic_subscribers)})")
+
+    def unsubscribe_topic(self, topic: str, q: asyncio.Queue) -> None:
+        """Remove a queue from a topic subscription."""
+        queues = self._topic_subscribers.get(topic, [])
+        if q in queues:
+            queues.remove(q)
+            if not queues:
+                del self._topic_subscribers[topic]
+            logger.info(f"Topic subscriber removed: {topic}")
 
     @property
     def subscriber_count(self) -> int:

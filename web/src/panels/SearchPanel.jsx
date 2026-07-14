@@ -2,6 +2,8 @@ import { useState, useRef, useCallback } from "react";
 import DOMPurify from "dompurify";
 import * as api from "../api";
 import { FONTS, SOURCE_COLORS } from "../styles/theme.js";
+import PanelLayout from "../components/PanelLayout";
+import EmptyState from "../components/EmptyState";
 
 export default function SearchPanel() {
   const [query, setQuery] = useState("");
@@ -24,37 +26,46 @@ export default function SearchPanel() {
     doSearch();
   }, [doSearch]);
 
+  const searchForm = (
+    <form onSubmit={handleSubmit} style={{ display: "flex", gap: 8 }}>
+      <input
+        ref={inputRef}
+        type="text"
+        value={query}
+        onChange={e => setQuery(e.target.value)}
+        placeholder="Search sessions, messages, vault..."
+        style={{ flex: 1, padding: "8px 12px", background: "rgba(0,212,255,0.06)", border: "1px solid rgba(0,212,255,0.2)", borderRadius: 4, fontFamily: FONTS.mono, fontSize: 11, color: "#e8f4fd", outline: "none" }}
+      />
+      <select
+        value={sourceFilter}
+        onChange={e => setSourceFilter(e.target.value)}
+        style={{ padding: "6px 10px", background: "rgba(0,212,255,0.06)", border: "1px solid rgba(0,212,255,0.2)", borderRadius: 4, fontFamily: FONTS.mono, fontSize: 10, color: "#e8f4fd", outline: "none", cursor: "pointer" }}
+      >
+        <option value="">all</option>
+        <option value="session">sessions</option>
+        <option value="discord">discord</option>
+        <option value="vault">vault</option>
+        <option value="error">error</option>
+        <option value="cron">cron</option>
+      </select>
+      <button
+        type="submit"
+        disabled={loading || !query.trim()}
+        style={{ padding: "8px 14px", background: loading ? "rgba(0,212,255,0.08)" : "rgba(0,212,255,0.2)", border: "1px solid rgba(0,212,255,0.4)", borderRadius: 4, color: loading ? "rgba(0,212,255,0.4)" : "#00d4ff", fontFamily: FONTS.mono, fontSize: 10, fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", letterSpacing: "0.08em" }}
+      >
+        {loading ? "..." : "SEARCH"}
+      </button>
+    </form>
+  );
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12, height: "100%" }}>
-      <form onSubmit={handleSubmit} style={{ display: "flex", gap: 8 }}>
-        <input
-          ref={inputRef}
-          type="text"
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          placeholder="Search sessions, messages, vault..."
-          style={{ flex: 1, padding: "8px 12px", background: "rgba(0,212,255,0.06)", border: "1px solid rgba(0,212,255,0.2)", borderRadius: 4, fontFamily: FONTS.mono, fontSize: 11, color: "#e8f4fd", outline: "none" }}
-        />
-        <select
-          value={sourceFilter}
-          onChange={e => setSourceFilter(e.target.value)}
-          style={{ padding: "6px 10px", background: "rgba(0,212,255,0.06)", border: "1px solid rgba(0,212,255,0.2)", borderRadius: 4, fontFamily: FONTS.mono, fontSize: 10, color: "#e8f4fd", outline: "none", cursor: "pointer" }}
-        >
-          <option value="">all</option>
-          <option value="session">sessions</option>
-          <option value="discord">discord</option>
-          <option value="vault">vault</option>
-          <option value="error">error</option>
-          <option value="cron">cron</option>
-        </select>
-        <button
-          type="submit"
-          disabled={loading || !query.trim()}
-          style={{ padding: "8px 14px", background: loading ? "rgba(0,212,255,0.08)" : "rgba(0,212,255,0.2)", border: "1px solid rgba(0,212,255,0.4)", borderRadius: 4, color: loading ? "rgba(0,212,255,0.4)" : "#00d4ff", fontFamily: FONTS.mono, fontSize: 10, fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", letterSpacing: "0.08em" }}
-        >
-          {loading ? "..." : "SEARCH"}
-        </button>
-      </form>
+    <PanelLayout
+      title="SEARCH"
+      icon="⌕"
+      accentColor="#2dd4bf"
+    >
+      {/* Search form lives outside PanelLayout's content scroll to stay fixed at top */}
+      {searchForm}
 
       {results && (
         <div style={{ flex: 1, overflowY: "auto" }}>
@@ -62,7 +73,11 @@ export default function SearchPanel() {
             {results.total ?? 0} RESULTS · {Object.entries(results.sources || {}).map(([k, v]) => `${k}: ${v}`).join(" · ")}
           </div>
           {results.results?.length === 0 && (
-            <div style={{ padding: 20, textAlign: "center", fontFamily: FONTS.mono, fontSize: 10, color: "rgba(150,180,220,0.3)" }}>No results</div>
+            <EmptyState
+              icon="⌕"
+              title="No results"
+              description="Try a different search query or source filter"
+            />
           )}
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {results.results?.map((r, i) => (
@@ -112,13 +127,12 @@ export default function SearchPanel() {
       )}
 
       {!results && !loading && (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontFamily: FONTS.mono, fontSize: 10, color: "rgba(150,180,220,0.3)", letterSpacing: "0.1em" }}>ENTER QUERY TO SEARCH</div>
-            <div style={{ fontFamily: FONTS.mono, fontSize: 9, color: "rgba(150,180,220,0.2)", marginTop: 6 }}>Indexes sessions, Discord messages, and vault files</div>
-          </div>
-        </div>
+        <EmptyState
+          icon="⌕"
+          title="Enter query to search"
+          description="Indexes sessions, Discord messages, and vault files"
+        />
       )}
-    </div>
+    </PanelLayout>
   );
 }

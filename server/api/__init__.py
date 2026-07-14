@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -13,6 +14,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from server.agents.hermes_adapter import HermesAdapter
 from server.agents.shu_adapter import ShuDiscordAdapter
 from server.agents.claude_code_adapter import ClaudeCodeAdapter
+from server.agents.sub_agent_adapter import SubAgentAdapter
 from server.aggregators.activity_engine import ActivityEngine
 from server.aggregators.briefing import BriefingGenerator
 from server.aggregators.claude_code_reader import ClaudeCodeReader
@@ -20,16 +22,24 @@ from server.aggregators.context_engine import ContextEngine
 from server.aggregators.cron_dashboard import CronDashboard
 from server.aggregators.dispatch import dispatch_to_arete, dispatch_to_shu
 from server.aggregators.health_score import HealthScoreEngine
-from server.aggregators.ibcb_reader import IBCBReader  # aliased TailscaleMailboxReader
+from server.aggregators.ibcb_reader import IBCBReader # aliased TailscaleMailboxReader
 from server.aggregators.memory_reader import MemoryReader
 from server.aggregators.pipeline_engine import PipelineEngine
 from server.aggregators.search_engine import SearchEngine
 from server.aggregators.vault_analytics import VaultAnalytics
+from server.aggregators.overview_engine import get_vps_health, get_activity_by_day, get_agent_response_counts, get_recent_activity, get_session_totals, get_gateway_info, AGENT_LOGS_DB
+from server.aggregators.board import list_tasks, get_task, create_task, move_task, update_task, delete_task
+from server.aggregators.cron_reader import get_system_crons, parse_hermes_crons
 from server.events import get_event_bus
 from server.models import DashboardHealth, AgentStatus
 from server.models import ClaudeSession, ClaudeTask, ClaudePlan, ClaudeFileChange
 from server.vault import VaultReader
 from server.utils.circuit_breaker import CircuitBreaker, CircuitState, CircuitOpenError
+from server.chat.models import ChatRequest, ChatResponse, ChatEvent
+from server.chat.session_store import ChatSessionStore
+from server.chat.arete_chat import AreteChatEngine
+from server.chat.claude_chat import ClaudeChatEngine
+from server.chat.shu_chat import ShuChatEngine
 
 router = APIRouter(tags=["health"])
 admin_router = APIRouter(tags=["admin"], prefix="/admin")
@@ -63,6 +73,16 @@ _claude: ClaudeCodeAdapter | None = None
 _claude_reader: ClaudeCodeReader | None = None
 _discord_cfg: dict = {}
 
+# ── Sub-agents (Scout, Scribe, Reach, Dev) ────────────────────────────
+_sub_agents: dict[str, SubAgentAdapter] = {}
+SUB_AGENT_IDS = ("scout", "scribe", "reach", "dev")
+
+# ── Chat engine globals ──────────────────────────────────────────────
+_chat_store: ChatSessionStore | None = None
+_arete_chat: AreteChatEngine | None = None
+_claude_chat: ClaudeChatEngine | None = None
+_shu_chat: ShuChatEngine | None = None
+
 _start_time = datetime.now(timezone.utc)
 
 
@@ -70,6 +90,8 @@ def init_adapters(hermes_url: str, discord_cfg: dict, vault_path: str, claude_cf
     global _hermes, _shu, _vault, _activity, _briefing, _search, _ibcb, _discord_cfg
     global _context, _memory, _pipeline, _health_score, _vault_analytics, _cron_dashboard
     global _claude, _claude_reader
+    global _chat_store, _arete_chat, _claude_chat, _shu_chat
+    global _sub_agents
     import logging
     logger = logging.getLogger("acc-dashboard")
 
@@ -126,6 +148,32 @@ def init_adapters(hermes_url: str, discord_cfg: dict, vault_path: str, claude_cf
         _claude = None
         _claude_reader = None
 
+    # ── Chat engines ──────────────────────────────────────────────
+    _chat_store = ChatSessionStore()
+    bus = get_event_bus()
+    _arete_chat = AreteChatEngine(_chat_store)
+    _claude_chat = ClaudeChatEngine(_chat_store, bus)
+    # ShuChatEngine needs an httpx.AsyncClient — create a shared one
+    import httpx
+    _shu_http = httpx.AsyncClient()
+    _shu_chat = ShuChatEngine(_chat_store, _shu_http)
+    logger.info("chat_engines_initialized")
+
+    # ── Sub-agents (Scout, Scribe, Reach, Dev) ──────────────────────
+    for agent_id in SUB_AGENT_IDS:
+        try:
+            adapter = SubAgentAdapter(agent_id)
+            _sub_agents[agent_id] = adapter
+            logger.info(
+                "sub_agent_initialized",
+                extra={"agent_id": agent_id, "port": adapter._port},
+            )
+        except Exception as exc:
+            logger.warning(
+                "sub_agent_init_failed",
+                extra={"agent_id": agent_id, "error": str(exc)},
+            )
+
 
 @router.get("/health")
 async def get_health() -> DashboardHealth:
@@ -170,8 +218,36 @@ async def get_health() -> DashboardHealth:
 
     skills = await _hermes.list_skills()
 
+    # Sub-agents health checks (parallel for speed)
+    sub_agent_results: dict[str, AgentStatus] = {}
+    async def _check_sub(agent_id: str, adapter: SubAgentAdapter) -> tuple[str, AgentStatus]:
+        try:
+            return agent_id, await adapter.health()
+        except Exception as exc:
+            return agent_id, AgentStatus(
+                agent_id=agent_id,
+                agent_type="hermes-sub",
+                name=f"ARETE {adapter._display_name}",
+                status="offline",
+                model=adapter._model,
+                error_message=str(exc),
+            )
+
+    if _sub_agents:
+        results = await asyncio.gather(
+            *[_check_sub(aid, adapter) for aid, adapter in _sub_agents.items()]
+        )
+        sub_agent_results = dict(results)
+
+    all_agents = {
+        "arete": arete,
+        "shu": shu,
+        **({"claude-code": claude} if claude else {}),
+        **sub_agent_results,
+    }
+
     return DashboardHealth(
-        agents={**{"arete": arete, "shu": shu}, **({"claude-code": claude} if claude else {})},
+        agents=all_agents,
         server_uptime=(datetime.now(timezone.utc) - _start_time).total_seconds(),
         total_sessions=arete.session_count,
         total_skills=len(skills),
@@ -247,6 +323,8 @@ async def get_agent_health(agent_id: str):
     if agent_id == "shu":
         assert _shu is not None
         return await _shu.health()
+    if agent_id in _sub_agents:
+        return await _sub_agents[agent_id].health()
     return {"error": f"Unknown agent: {agent_id}"}
 
 
@@ -299,28 +377,35 @@ async def set_agent_model(agent_id: str, request: Request):
 
 @router.get("/sessions")
 async def get_sessions(limit: int = 10):
-    assert _hermes is not None
-    assert _shu is not None
-
-    arete_sessions = await _hermes.recent_sessions(limit)
-    shu_sessions = await _shu.recent_sessions(limit)
-
+    sessions = []
+    if _hermes is not None:
+        try:
+            sessions.extend(await _hermes.recent_sessions(limit))
+        except Exception:
+            pass
+    if _shu is not None:
+        try:
+            sessions.extend(await _shu.recent_sessions(limit))
+        except Exception:
+            pass
     # Merge and sort by last_active desc
-    merged = arete_sessions + shu_sessions
-    merged.sort(key=lambda s: s.last_active, reverse=True)
-    return merged[:limit]
+    sessions.sort(key=lambda s: s.last_active, reverse=True)
+    return sessions[:limit]
 
 
 @router.get("/sessions/{agent_id}")
 async def get_agent_sessions(agent_id: str, limit: int = 10):
-    assert _hermes is not None
-    assert _shu is not None
-
-    if agent_id == "arete":
-        return await _hermes.recent_sessions(limit)
-    if agent_id == "shu":
-        return await _shu.recent_sessions(limit)
-    return {"error": f"Unknown agent: {agent_id}"}
+    if agent_id == "arete" and _hermes is not None:
+        try:
+            return await _hermes.recent_sessions(limit)
+        except Exception:
+            return []
+    if agent_id == "shu" and _shu is not None:
+        try:
+            return await _shu.recent_sessions(limit)
+        except Exception:
+            return []
+    return []
 
 
 @router.get("/errors")
@@ -395,12 +480,16 @@ async def get_activity(
     agent_id: str | None = Query(None),
     event_type: str | None = Query(None),
 ):
-    assert _activity is not None
-    return await _activity.get_timeline(
-        limit=limit,
-        agent_id=agent_id,
-        event_type=event_type,
-    )
+    if _activity is None:
+        return []
+    try:
+        return await _activity.get_timeline(
+            limit=limit,
+            agent_id=agent_id,
+            event_type=event_type,
+        )
+    except Exception:
+        return []
 
 
 @router.get("/activity/{agent_id}")
@@ -409,12 +498,16 @@ async def get_agent_activity(
     limit: int = Query(50, le=200),
     event_type: str | None = Query(None),
 ):
-    assert _activity is not None
-    return await _activity.get_timeline(
-        limit=limit,
-        agent_id=agent_id,
-        event_type=event_type,
-    )
+    if _activity is None:
+        return []
+    try:
+        return await _activity.get_timeline(
+            limit=limit,
+            agent_id=agent_id,
+            event_type=event_type,
+        )
+    except Exception:
+        return []
 
 
 @router.get("/briefing")
@@ -422,21 +515,29 @@ async def get_briefing(
     hours: int = Query(24, le=168),
     since: str | None = Query(None, description="ISO timestamp for 'since last checkin'"),
 ):
-    assert _briefing is not None
-    if since:
-        try:
-            since_dt = datetime.fromisoformat(since)
-        except (ValueError, TypeError):
-            return {"error": "Invalid since parameter. Use ISO timestamp format."}
-        return await _briefing.generate(since=since_dt)
-    return await _briefing.generate(hours=hours)
+    if _briefing is None:
+        return {"error": "Briefing engine not initialized", "items": []}
+    try:
+        if since:
+            try:
+                since_dt = datetime.fromisoformat(since)
+            except (ValueError, TypeError):
+                return {"error": "Invalid since parameter. Use ISO timestamp format.", "items": []}
+            return await _briefing.generate(since=since_dt)
+        return await _briefing.generate(hours=hours)
+    except Exception as e:
+        return {"error": f"Briefing generation failed: {e}", "items": []}
 
 
 @router.get("/context-gaps")
 async def get_context_gaps(limit: int = Query(50, le=200)):
     """Surface knowledge gaps between ARETE and Shu agents."""
-    assert _context is not None
-    return await _context.get_gaps(limit=limit)
+    if _context is None:
+        return []
+    try:
+        return await _context.get_gaps(limit=limit)
+    except Exception:
+        return []
 
 
 @router.get("/memory/{agent_id}")
@@ -934,6 +1035,23 @@ async def _gather_state() -> str:
     except Exception:
         pass
 
+    # Sub-agents (Scout, Scribe, Reach, Dev)
+    for _aid, _adapter in _sub_agents.items():
+        try:
+            _h = await _adapter.health()
+            data["agents"].append(
+                {
+                    "id": _aid,
+                    "name": _h.name,
+                    "status": _h.status,
+                    "model": _h.model,
+                    "session_count": _h.session_count,
+                    "current_task": _h.current_task,
+                }
+            )
+        except Exception:
+            pass
+
     try:
         sessions: list[dict] = []
         if _hermes is not None:
@@ -1285,6 +1403,406 @@ async def get_inference_usage():
     }
 
 
+# ── Overview & VPS Endpoints ──────────────────────────────────────────
+
+
+@router.get("/overview")
+async def get_overview():
+    """Aggregate overview data for the Overview tab: agents, VPS, activity, stats."""
+    import asyncio
+
+    # Gather agent health (reuse health logic with sub-agents)
+    agents = {}
+    for agent_id, adapter in [
+        ("arete", _hermes),
+        ("shu", _shu),
+    ] + [("claude-code", _claude)] + [(aid, _sub_agents[aid]) for aid in _sub_agents]:
+        if adapter is None:
+            continue
+        try:
+            h = await adapter.health()
+            agents[agent_id] = {
+                "id": agent_id,
+                "name": h.name,
+                "status": h.status,
+                "model": h.model,
+                "session_count": h.session_count,
+                "current_task": h.current_task,
+                "error_count": h.error_count,
+                "last_active": h.last_active.isoformat() if h.last_active else None,
+            }
+        except Exception as exc:
+            agents[agent_id] = {"id": agent_id, "name": agent_id.upper(), "status": "offline", "error_message": str(exc)}
+
+    # Response counts per agent
+    response_counts = get_agent_response_counts()
+
+    # Activity by day (last 7 days)
+    activity_by_day = get_activity_by_day(7)
+
+    # Recent activity
+    activity = get_recent_activity(20)
+
+    # Session totals
+    session_totals = get_session_totals()
+
+    # Gateway info
+    gateway = await get_gateway_info()
+
+    # Health score
+    try:
+        health_data = await get_health_score()
+        score = health_data.get("score", 0)
+    except Exception:
+        score = 0
+
+    # Stats
+    total_agents = len(agents)
+    online_agents = sum(1 for a in agents.values() if a.get("status") == "online")
+    total_responses = sum(response_counts.values())
+    failed = sum(a.get("error_count", 0) for a in agents.values())
+    completed = total_responses
+    success_rate = round(completed / max(completed + failed, 1) * 100, 2)
+
+    # Cache tokens from inference usage
+    cache_hits = 0
+    try:
+        arete_sessions = await _hermes.recent_sessions(50)
+        for s in arete_sessions:
+            cache_hits += getattr(s, "token_count", 0) or 0
+    except Exception:
+        pass
+
+    # Kanban (cron jobs count)
+    kanban_total = 0
+    try:
+        from server.db import get_connection
+        with get_connection() as conn:
+            # Try to get cron tasks count from the cron dashboard
+            pass  # Will use CronDashboard instead
+    except Exception:
+        pass
+    try:
+        cron_data = await _cron_dashboard.get_summary()
+        kanban_total = cron_data.get("total_jobs", 0)
+    except Exception:
+        pass
+
+    # Calculate uptime from ARETE agent
+    uptime_seconds = None
+    arete_status = agents.get("arete", {})
+    if arete_status:
+        uptime_seconds = None  # Will be derived from process start
+
+    return {
+        "agents": agents,
+        "vps": await get_vps_health(),
+        "activity_by_day": activity_by_day,
+        "activity": activity,
+        "stats": {
+            "total": total_responses + completed,  # total responses + completed
+            "completed": completed,
+            "failed": failed,
+            "success_rate": success_rate,
+        },
+        "sessions": {
+            "count": session_totals.get("count", 0),
+            "totals": {
+                "messages": total_responses,
+                "input_tokens": 0,
+                "cache_read_tokens": cache_hits,
+            },
+        },
+        "kanban": {"total": kanban_total},
+        "gateway": {
+            "uptime_seconds": uptime_seconds,
+            "status": gateway.get("status", "unknown"),
+        },
+        "score": score,
+        "online_agents": online_agents,
+        "total_agents": total_agents,
+        "response_counts": response_counts,
+    }
+
+
+@router.get("/vps")
+async def get_vps():
+    """Real-time VPS metrics: CPU, RAM, Disk, DB sizes."""
+    return await get_vps_health()
+
+
+@router.get("/agents")
+async def get_agents():
+    """Agent details for the Agents tab: cards, status, 7-day activity, logs."""
+    from datetime import datetime, timezone, timedelta
+    import sqlite3
+
+    # ── Agent metadata ──────────────────────────────────────────────────
+    AGENT_META = {
+        "arete":   {"code": "ORCH", "name": "Orchestrator", "role": "Central command agent — dispatches tasks, orchestrates sub-agent pipelines, and manages the ACC Dashboard.", "platform": "Discord", "accent": "#A78BFA"},
+        "scout":   {"code": "SCNT", "name": "Scout",        "role": "Research & reconnaissance agent — deep web research, synthesis, and intelligence briefings.", "platform": "Discord", "accent": "#7DD3FC"},
+        "scribe":  {"code": "SCRB", "name": "Scribe",        "role": "Writing & documentation agent — blog posts, documentation, and editorial content from research.", "platform": "Discord", "accent": "#F472B6"},
+        "reach":   {"code": "RECH", "name": "Reach",         "role": "Marketing & distribution agent — social media captions, strategy, and audience targeting.", "platform": "Discord", "accent": "#E879F9"},
+        "dev":     {"code": "DEV",  "name": "Dev",            "role": "Engineering & build agent — code implementation, debugging, and deployment.", "platform": "Telegram", "accent": "#A78BFA"},
+    }
+
+    # ── Classify status by last_active timestamp ─────────────────────────
+    now = datetime.now(timezone.utc)
+    threshold_active = now - timedelta(minutes=10)
+    threshold_idle = now - timedelta(hours=6)
+
+    # ── Gather health from adapters ──────────────────────────────────────
+    agents = {}
+    for agent_id, meta in AGENT_META.items():
+        adapter = None
+        if agent_id == "arete" and _hermes:
+            adapter = _hermes
+        elif agent_id in _sub_agents:
+            adapter = _sub_agents.get(agent_id)
+        elif agent_id == "shu" and _shu:
+            # Shu not shown in agents tab per spec (5 agents only)
+            pass
+
+        if adapter is None:
+            agents[agent_id] = {**meta, "status_class": "dormant", "health_status": "offline", "model": "", "session_count": 0, "error_count": 0, "last_active": None, "current_task": None, "responses": 0, "success_rate": 0, "activity_7d": [], "last_task": None, "last_task_time": None}
+            continue
+
+        try:
+            h = await adapter.health()
+            last_active = h.last_active
+            last_active_str = last_active.isoformat() if last_active else None
+
+            if last_active and last_active > threshold_active:
+                status_class = "active"
+            elif last_active and last_active > threshold_idle:
+                status_class = "idle"
+            else:
+                status_class = "dormant"
+
+            agents[agent_id] = {
+                **meta,
+                "health_status": h.status,
+                "status_class": status_class,
+                "model": h.model or "",
+                "session_count": h.session_count,
+                "error_count": h.error_count,
+                "last_active": last_active_str,
+                "current_task": h.current_task,
+            }
+        except Exception as exc:
+            agents[agent_id] = {**meta, "status_class": "dormant", "health_status": "error", "model": "", "session_count": 0, "error_count": 0, "last_active": None, "current_task": None, "error_message": str(exc)[:120]}
+
+    # ── Per-agent response counts & success rates from agent-logs.db ─────
+    response_counts = get_agent_response_counts()
+    for aid in agents:
+        agents[aid]["responses"] = response_counts.get(aid, 0)
+
+    # ── Per-agent 7-day activity bars ────────────────────────────────────
+    now_date = datetime.now(timezone.utc).date()
+    for aid in agents:
+        daily = []
+        for i in range(6, -1, -1):
+            day = now_date - timedelta(days=i)
+            daily.append({"date": day.isoformat(), "count": 0})
+        agents[aid]["activity_7d"] = daily
+
+    if AGENT_LOGS_DB.is_file():
+        try:
+            conn = sqlite3.connect(str(AGENT_LOGS_DB))
+            cur = conn.cursor()
+            week_ago = (now_date - timedelta(days=7)).isoformat()
+            cur.execute(
+                "SELECT agent_name, DATE(created_at), COUNT(*) FROM agent_logs WHERE created_at > ? GROUP BY agent_name, DATE(created_at)",
+                (week_ago + "T00:00:00Z",),
+            )
+            for row in cur.fetchall():
+                aid, day_str, count = row
+                if aid in agents:
+                    for d in agents[aid]["activity_7d"]:
+                        if d["date"] == day_str:
+                            d["count"] = count
+            # Also fill success rate
+            cur.execute(
+                "SELECT agent_name, status, COUNT(*) FROM agent_logs GROUP BY agent_name, status",
+            )
+            for row in cur.fetchall():
+                aid, status, count = row
+                if aid in agents:
+                    if status == "completed":
+                        pass  # already in response_counts
+                    if status == "failed":
+                        agents[aid].setdefault("_failed", 0)
+                        agents[aid]["_failed"] = agents[aid].get("_failed", 0) + count
+            conn.close()
+        except Exception:
+            pass
+
+    # Calculate success rates
+    for aid in agents:
+        completed = response_counts.get(aid, 0)
+        failed = agents[aid].pop("_failed", 0)
+        total = completed + failed
+        agents[aid]["success_rate"] = round(completed / max(total, 1) * 100, 1) if total > 0 else 100.0
+
+    # ── Last task per agent ───────────────────────────────────────────────
+    last_tasks = get_recent_activity(50)
+    for entry in reversed(last_tasks):
+        aid = entry.get("agent", "")
+        if aid in agents and agents[aid].get("last_task") is None:
+            agents[aid]["last_task"] = entry.get("task", "")[:100]
+            agents[aid]["last_task_time"] = entry.get("timestamp")
+
+    # Default missing tasks
+    for aid in agents:
+        agents[aid].setdefault("last_task", None)
+        agents[aid].setdefault("last_task_time", None)
+
+    # ── Full activity log for the table ──────────────────────────────────
+    activity_log = get_recent_activity(100)
+
+    # ── Status counts ────────────────────────────────────────────────────
+    active = sum(1 for a in agents.values() if a["status_class"] == "active")
+    idle = sum(1 for a in agents.values() if a["status_class"] == "idle")
+    dormant = sum(1 for a in agents.values() if a["status_class"] == "dormant")
+
+    return {
+        "agents": agents,
+        "log": activity_log,
+        "status_summary": {"active": active, "idle": idle, "dormant": dormant},
+        "activity_by_day": get_activity_by_day(7),
+        "stats": {
+            "total": sum(response_counts.values()),
+            "completed": sum(response_counts.values()),
+            "failed": sum(a.get("error_count", 0) for a in agents.values() if isinstance(a, dict)),
+            "success_rate": round(sum(response_counts.values()) / max(sum(response_counts.values()) + sum(a.get("error_count", 0) for a in agents.values() if isinstance(a, dict)), 1) * 100, 1),
+        },
+    }
+
+
+# ── Task Board Endpoints ───────────────────────────────────────────────
+
+
+@router.get("/board")
+async def api_list_tasks():
+    """List all tasks on the board, ordered by status then created_at."""
+    return list_tasks()
+
+
+@router.post("/board")
+async def api_create_task(request: Request):
+    """Create a new task. Body: {title, priority?, notes?}"""
+    body = await request.json()
+    title = body.get("title", "").strip()
+    if not title:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "title is required"}, status_code=400)
+    priority = body.get("priority", "medium")
+    notes = body.get("notes")
+    task = create_task(title=title, priority=priority, notes=notes)
+    return task
+
+
+@router.put("/board/{task_id}")
+async def api_update_task(task_id: str, request: Request):
+    """Update a task's title, priority, or notes."""
+    body = await request.json()
+    task = update_task(task_id, **{k: body[k] for k in ("title", "priority", "notes") if k in body})
+    if task is None:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "task not found"}, status_code=404)
+    return task
+
+
+@router.post("/board/{task_id}/move")
+async def api_move_task(task_id: str, request: Request):
+    """Move task forward (direction=1) or backward (direction=-1). Body: {direction: 1|-1}"""
+    body = await request.json()
+    direction = body.get("direction", 1)
+    task = move_task(task_id, direction=direction)
+    if task is None:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "task not found"}, status_code=404)
+    return task
+
+
+@router.delete("/board/{task_id}")
+async def api_delete_task(task_id: str):
+    """Delete a task."""
+    deleted = delete_task(task_id)
+    if not deleted:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "task not found"}, status_code=404)
+    return {"deleted": True, "id": task_id}
+
+
+# ── Content Library Endpoints ────────────────────────────────────────────
+
+from server.aggregators.content import list_content, get_content, save_content
+
+
+@router.get("/content")
+async def api_content_list():
+    """List all .md files in the content library."""
+    return list_content()
+
+
+@router.get("/content/get")
+async def api_content_get(path: str = ""):
+    """Get a single file's raw markdown content. Path must be under content root."""
+    if not path:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "path parameter is required"}, status_code=400)
+    result = get_content(path)
+    if result is None:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "file not found or invalid path"}, status_code=404)
+    return result
+
+
+@router.post("/content/save")
+async def api_content_save(request: Request):
+    """Save content to a file. Body: {path, content}."""
+    body = await request.json()
+    path = body.get("path", "").strip()
+    content = body.get("content", "")
+    if not path:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "path is required"}, status_code=400)
+    result = save_content(path, content)
+    if result is None:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "invalid path or write failed"}, status_code=400)
+    return result
+
+
+# ── Schedule Endpoints ─────────────────────────────────────────────────
+
+
+@router.get("/schedule")
+async def api_schedule():
+    """Return combined Hermes + system cron jobs for the Schedule tab."""
+    from server.aggregators.cron_reader import get_system_crons, parse_hermes_crons
+
+    assert _hermes is not None
+    assert _cron_dashboard is not None
+
+    # Get Hermes cron jobs via Hermes adapter + CronDashboard
+    try:
+        jobs = await _hermes.list_cron_jobs()
+    except Exception:
+        jobs = []
+    cron_data = _cron_dashboard.get_dashboard(jobs)
+    hermes_entries = parse_hermes_crons(cron_data)
+
+    # System crons
+    system_entries = get_system_crons()
+
+    return {
+        "hermes": hermes_entries,
+        "system": system_entries,
+    }
+
+
 # ── Claude Code Endpoints ──────────────────────────────────────────────
 
 
@@ -1365,3 +1883,230 @@ async def get_claude_code_file_history(session_id: str):
         return []
     changes = await _claude_reader.get_file_history(session_id)
     return [c.model_dump(mode="json") for c in changes]
+
+
+# ── Chat API Routes ────────────────────────────────────────────────────
+# Task 2.1: 6 chat endpoints + SSE stream (2.2)
+# Rate limiting applied via EXPENSIVE_ROUTE_LIMITS in main.py.
+# Auth enforced by the auth middleware on all /api/* routes.
+# SSE endpoint uses query-param auth (EventSource can't send headers).
+
+
+@router.post("/chat/arete")
+async def chat_arete(req: ChatRequest) -> ChatResponse:
+    """Send a message to ARETE via the Hermes CLI subprocess.
+
+    Only one request at a time (409 on concurrent). 180s timeout.
+    Returns a ChatResponse with messages array for the frontend.
+    """
+    if _arete_chat is None:
+        raise HTTPException(status_code=503, detail="ARETE chat engine not initialized")
+    resp = await _arete_chat.send(
+        message=req.message,
+        session_id=req.session_id,
+        model=req.model,
+    )
+    # Populate messages array so the frontend can render assistant reply
+    if resp.success and resp.response:
+        from server.chat.models import ChatMessage
+        now = datetime.now(timezone.utc).isoformat()
+        resp.messages = [
+            ChatMessage(role="user", content=req.message, timestamp=now),
+            ChatMessage(role="assistant", content=resp.response, timestamp=now),
+        ]
+        if req.model:
+            resp.model = req.model
+    return resp
+
+
+@router.post("/chat/claude")
+async def chat_claude(req: ChatRequest):
+    """Send a message to Claude Code and stream events via SSE.
+
+    Returns immediately with a request_id. The client opens an SSE
+    connection to /chat/stream/{request_id} to receive streaming events.
+    Only one request at a time (409 on concurrent).
+    """
+    if _claude_chat is None:
+        raise HTTPException(status_code=503, detail="Claude chat engine not initialized")
+    if not req.model:
+        raise HTTPException(status_code=422, detail="model is required for Claude chat")
+    request_id = _req_id()
+    # Fire-and-forget: the subprocess runs in the background while
+    # the client subscribes to events via SSE.
+    asyncio.create_task(
+        _claude_chat.send(
+            message=req.message,
+            session_id=req.session_id,
+            model=req.model,
+            request_id=request_id,
+        )
+    )
+    return {"success": True, "request_id": request_id}
+
+
+@router.post("/chat/shu")
+async def chat_shu(req: ChatRequest):
+    """Send a chat message to Shu over HTTP (Tailscale).
+
+    The message is POSTed to Shu's endpoint and logged to the
+    shared JSONL inbox. Response polling is via GET /chat/shu/messages.
+    """
+    if _shu_chat is None:
+        raise HTTPException(status_code=503, detail="Shu chat engine not initialized")
+    result = await _shu_chat.send(req.message)
+    if not result.get("success"):
+        raise HTTPException(status_code=502, detail=result.get("error", "Shu unreachable"))
+    return result
+
+
+@router.get("/chat/shu/messages")
+async def chat_shu_messages(
+    since: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Read chat messages from Shu's JSONL inbox.
+
+    Returns messages where from=="shu" (not "shu-trading") and
+    type is "chat" or "chat_out". Ordered by timestamp ascending.
+    """
+    messages = ShuChatEngine.get_messages(since=since, limit=limit)
+    return {"messages": messages, "has_more": len(messages) >= limit}
+
+
+@router.get("/chat/arete/models")
+async def chat_arete_models():
+    """List available models for ARETE chat.
+
+    Reads from the Hermes config or falls back to a default list.
+    """
+    # Try reading hermes model list from config
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["hermes", "model", "list"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            models = [line.strip() for line in result.stdout.strip().splitlines() if line.strip()]
+            current = ""
+            return {"models": models, "current": current}
+    except Exception:
+        pass
+    # Fallback defaults
+    return {"models": [], "current": ""}
+
+
+@router.get("/chat/claude/models")
+async def chat_claude_models():
+    """List available models for Claude Code chat.
+
+    Reads from ~/ollama_cloud_models_cache.json, falls back to
+    a hardcoded default list.
+    """
+    cache_path = Path.home() / "ollama_cloud_models_cache.json"
+    models: list[str] = []
+    current = ""
+    try:
+        if cache_path.exists():
+            import json
+            data = json.loads(cache_path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                models = data.get("models", [])
+                current = data.get("current", "")
+            elif isinstance(data, list):
+                models = data
+    except Exception:
+        pass
+    if not models:
+        models = ["sonnet", "haiku", "opus", "kimi-k2.6:cloud"]
+        current = "sonnet"
+    return {"models": models, "current": current}
+
+
+@router.delete("/chat/{agent}/cancel")
+async def chat_cancel(agent: str):
+    """Cancel a running chat subprocess for the given agent.
+
+    Sends SIGTERM (then SIGKILL after 0.5s) to the running process.
+    Publishes a ChatEvent(type="cancelled") to SSE.
+    """
+    engine_map = {
+        "arete": _arete_chat,
+        "claude": _claude_chat,
+    }
+    engine = engine_map.get(agent)
+    if engine is None:
+        raise HTTPException(status_code=404, detail=f"No cancellable engine for agent: {agent}")
+
+    cancelled = await engine.cancel()
+    if not cancelled:
+        return {"success": True, "cancelled": False, "detail": "No process was running"}
+
+    # Publish cancelled event to SSE
+    bus = get_event_bus()
+    await bus.publish("chat", {
+        "type": "cancelled",
+        "channel": agent,
+        "request_id": "",
+        "content": "",
+    })
+    return {"success": True, "cancelled": True}
+
+
+# ── SSE Stream Endpoint for Chat ─────────────────────────────────────
+# Task 2.2: Query-param auth for SSE (EventSource can't send headers).
+# Client opens: new EventSource("/api/chat/stream/{request_id}?token=X")
+
+@router.get("/chat/stream/{request_id}")
+async def chat_stream(
+    request_id: str,
+    token: str = Query(..., description="ACC_API_TOKEN for SSE auth"),
+):
+    """SSE endpoint that streams ChatEvents for a specific request.
+
+    The client must provide a valid ACC_API_TOKEN as a query parameter.
+    Events are sourced from the EventBus chat topic, filtered by
+    request_id. The stream auto-closes on done/error/cancelled events
+    or after a 45s idle timeout (sends heartbeat).
+    """
+    # Validate query-param token against ACC_API_TOKEN
+    _api_token = os.environ.get("ACC_API_TOKEN", "")
+    if _api_token and token != _api_token:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    bus = get_event_bus()
+
+    async def event_generator():
+        queue: asyncio.Queue = asyncio.Queue(maxsize=128)
+        bus.subscribe_topic(f"chat:{request_id}", queue)
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=45)
+                    data = event if isinstance(event, str) else json.dumps(event, default=str)
+                    yield "data: " + data + "\n\n"
+                    # Terminal events close the stream
+                    if isinstance(event, dict) and event.get("type") in ("done", "error", "cancelled"):
+                        break
+                except asyncio.TimeoutError:
+                    # Heartbeat to keep the connection alive
+                    yield 'data: {"type": "heartbeat"}\n\n'
+        finally:
+            bus.unsubscribe_topic(f"chat:{request_id}", queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+def _req_id() -> str:
+    """Generate a short unique request ID for SSE routing."""
+    import uuid as _uuid
+    return _uuid.uuid4().hex[:12]

@@ -1,17 +1,23 @@
 import { useState, useEffect } from "react";
 import * as api from "../api.js";
 import { FONTS } from "../styles/theme.js";
+import PanelLayout from "../components/PanelLayout";
+import EmptyState from "../components/EmptyState";
 
 export default function VaultVitalsPanel() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
     const fetchVaultVitals = async () => {
       try {
         const res = await api.getVaultVitals();
-        if (!cancelled) setData(res);
+        if (!cancelled) {
+          setData(res);
+          setLastUpdated(Date.now());
+        }
       } catch {
         // Vault vitals may be unavailable
       } finally {
@@ -55,20 +61,26 @@ export default function VaultVitalsPanel() {
     );
   };
 
+  // Build stats for PanelLayout header strip
+  const stats = data ? [
+    { label: "Entities", value: data.entity_count ?? "—" },
+    { label: "Files", value: data.file_count ?? "—" },
+    { label: "Size", value: data.total_size ?? "—" },
+  ] : [];
+
+  const hasData = !loading && data;
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12, height: "100%" }}>
-      <div style={{ fontFamily: FONTS.mono, fontSize: 9, color: "rgba(0,212,255,0.5)", letterSpacing: "0.16em" }}>
-        VAULT VITALS
-      </div>
-
-      {loading && !data && (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontFamily: FONTS.mono, fontSize: 10, color: "rgba(150,180,220,0.3)" }}>Loading vault vitals...</span>
-        </div>
-      )}
-
-      {data && (
-        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
+    <PanelLayout
+      title="VAULT"
+      icon="◆"
+      accentColor="#2dd4bf"
+      loading={loading && !data}
+      lastUpdated={lastUpdated}
+      stats={stats}
+    >
+      {hasData ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {/* Entity count + growth */}
           <div className="panel" style={{ padding: "12px 14px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -151,13 +163,9 @@ export default function VaultVitalsPanel() {
             )}
           </div>
         </div>
-      )}
-
-      {!loading && !data && (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontFamily: FONTS.mono, fontSize: 10, color: "rgba(150,180,220,0.3)" }}>No vault data available</span>
-        </div>
-      )}
-    </div>
+      ) : !loading ? (
+        <EmptyState icon="◆" title="No vault data available" description="Vault vitals could not be loaded. Check that the vault path is configured." />
+      ) : null}
+    </PanelLayout>
   );
 }

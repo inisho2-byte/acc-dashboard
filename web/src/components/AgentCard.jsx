@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { FONTS } from "../styles/theme.js";
 import * as api from "../api.js";
 import Sparkline from "./Sparkline.jsx";
 
-export default function AgentCard({ agent, delay, sparklineData }) {
+function AgentCard({ agent, delay, sparklineData }) {
   const [showModelMenu, setShowModelMenu] = useState(false);
   const [availableModels, setAvailableModels] = useState([]);
   const [swapping, setSwapping] = useState(false);
@@ -117,6 +117,8 @@ export default function AgentCard({ agent, delay, sparklineData }) {
           <Sparkline data={sparklineData} color={c} width={160} height={24} fillOpacity={0.08} />
         </div>
       )}
-    </div>
-  );
+ </div>
+ );
 }
+
+export default React.memo(AgentCard);

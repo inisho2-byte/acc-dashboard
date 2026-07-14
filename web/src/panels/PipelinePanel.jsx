@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import * as api from "../api.js";
 import { FONTS } from "../styles/theme.js";
+import PanelLayout from "../components/PanelLayout";
+import EmptyState from "../components/EmptyState";
 
 export default function PipelinePanel() {
   const [pipeline, setPipeline] = useState(null);
@@ -27,6 +29,8 @@ export default function PipelinePanel() {
   const active = pipeline?.active || false;
   const message = pipeline?.message;
 
+  const panelStats = stages.length > 0 ? [{ label: "Stages", value: stages.length }] : [];
+
   const getAgentColor = (agent) => agent === "arete" ? "#00d4ff" : "#a78bfa";
   const getStatusIcon = (status) => {
     switch (status) {
@@ -45,34 +49,21 @@ export default function PipelinePanel() {
     }
   };
 
-  if (loading) {
-    return (
-      <div style={{ padding: 20, textAlign: "center", fontFamily: FONTS.mono, fontSize: 10, color: "rgba(150,180,220,0.3)" }}>
-        Loading pipeline...
-      </div>
-    );
-  }
-
-  if (!active && stages.length === 0) {
-    return (
-      <div style={{ padding: 24, textAlign: "center" }}>
-        <div style={{ fontFamily: FONTS.mono, fontSize: 9, color: "rgba(0,212,255,0.4)", letterSpacing: "0.16em", marginBottom: 12 }}>AGENT PIPELINE</div>
-        <div style={{ fontFamily: FONTS.mono, fontSize: 10, color: "rgba(150,180,220,0.4)", lineHeight: 1.5 }}>
-          {message || "No active pipeline"}
-        </div>
-        <div style={{ fontFamily: FONTS.mono, fontSize: 8, color: "rgba(150,180,220,0.25)", marginTop: 12, lineHeight: 1.4 }}>
-          Pipeline activates when ARETE dispatches tasks to Shu.<br />
-          Inter-agent messages via Tailscale will appear here.
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div style={{ padding: 16 }}>
-      <div style={{ fontFamily: FONTS.mono, fontSize: 9, color: "rgba(0,212,255,0.5)", letterSpacing: "0.16em", marginBottom: 16 }}>
-        AGENT PIPELINE {active && <span style={{ color: "#00ff88" }}>· ACTIVE</span>}
-      </div>
+    <PanelLayout
+      title="PIPELINE"
+      icon="▸"
+      accentColor="#f59e0b"
+      loading={loading}
+      stats={panelStats}
+    >
+      {!active && stages.length === 0 ? (
+        <EmptyState icon="▸" title="No active pipeline" description={message || "Pipeline activates when ARETE dispatches tasks to Shu. Inter-agent messages via Tailscale will appear here."} />
+      ) : (
+        <div style={{ padding: 16 }}>
+          <div style={{ fontFamily: FONTS.mono, fontSize: 9, color: "rgba(0,212,255,0.5)", letterSpacing: "0.16em", marginBottom: 16 }}>
+            AGENT PIPELINE {active && <span style={{ color: "#00ff88" }}>· ACTIVE</span>}
+          </div>
 
       {/* Horizontal flow diagram */}
       <div style={{ display: "flex", alignItems: "center", gap: 4, overflowX: "auto", padding: "8px 0" }}>
@@ -115,10 +106,10 @@ export default function PipelinePanel() {
 
       {/* No stages message */}
       {stages.length === 0 && (
-        <div style={{ paddingTop: 8, fontFamily: FONTS.mono, fontSize: 9, color: "rgba(150,180,220,0.3)" }}>
-          Waiting for inter-agent message flow...
-        </div>
+        <EmptyState icon="▸" title="Waiting for pipeline" description="Waiting for inter-agent message flow..." />
       )}
     </div>
+      )}
+    </PanelLayout>
   );
 }

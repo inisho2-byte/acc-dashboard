@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { FONTS } from "../styles/theme.js";
 
-export default function CommandPalette({ sessions, projects, skills, agents, errors, activeTab, onNavigate, onRunSkill, onClose }) {
+export default function CommandPalette({ sessions, projects, skills, agents, errors, activeTab, onNavigate, onRunSkill, onClose, allTabs, tabLabels, groupColors }) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef(null);
@@ -18,16 +18,14 @@ export default function CommandPalette({ sessions, projects, skills, agents, err
     const q = query.trim().toLowerCase();
     const cmds = [];
 
-    // Navigation
-    const tabs = [
-      { label: "Go to Sessions", action: "tab", data: "sessions", icon: "→" },
-      { label: "Go to Errors", action: "tab", data: "errors", icon: "→" },
-      { label: "Go to Skills", action: "tab", data: "skills", icon: "→" },
-      { label: "Go to Search", action: "tab", data: "search", icon: "→" },
-      { label: "Go to Briefing", action: "tab", data: "briefing", icon: "→" },
-      { label: "Go to Dashboard", action: "tab", data: "errors-dashboard", icon: "→" },
-    ];
-    cmds.push(...tabs);
+    // Navigation — derived from navConfig when available
+    const navTabs = (allTabs || []).map(tabId => ({
+      label: `Go to ${tabLabels?.[tabId] || tabId}`,
+      action: "tab",
+      data: tabId,
+      icon: groupColors?.[tabId] ? "→" : "→",
+    }));
+    cmds.push(...navTabs);
 
     // Sessions
     if (sessions?.length) {
@@ -80,7 +78,7 @@ export default function CommandPalette({ sessions, projects, skills, agents, err
 
     if (!q) return cmds;
     return cmds.filter(c => c.label.toLowerCase().includes(q));
-  }, [query, sessions, projects, skills, agents, errors, activeTab]);
+  }, [query, sessions, projects, skills, agents, errors, activeTab, allTabs, tabLabels, groupColors]);
 
   useEffect(() => {
     const handler = (e) => {

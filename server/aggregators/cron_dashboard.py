@@ -171,6 +171,12 @@ class CronDashboard:
         if not schedule:
             return []
 
+        # Defensive: Hermes API may return schedule as a dict
+        if isinstance(schedule, dict):
+            schedule = schedule.get("expr") or schedule.get("display") or ""
+            if not schedule:
+                return []
+
         try:
             from croniter import croniter
             base = datetime.now(timezone.utc)
