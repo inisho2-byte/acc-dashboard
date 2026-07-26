@@ -32,9 +32,10 @@ web/node_modules/
 # Build artifacts
 acc_dashboard.egg-info/
 
-# Environment
+# Environment — secrets never committed, but keep the key-name template
 .env
 .env.*
+!.env.example
 
 # Build output
 web/dist/
